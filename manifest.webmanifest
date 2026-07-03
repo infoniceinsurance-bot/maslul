@@ -1,0 +1,15 @@
+{
+  "name": "מסלול · האימון היומי שלי",
+  "short_name": "מסלול",
+  "description": "אימון יומי בחשבון, עברית ואנגלית",
+  "start_url": "./",
+  "display": "standalone",
+  "dir": "rtl",
+  "lang": "he",
+  "background_color": "#F8F4ED",
+  "theme_color": "#F8F4ED",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
