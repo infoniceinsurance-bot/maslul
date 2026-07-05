@@ -6,8 +6,8 @@
   "display": "standalone",
   "dir": "rtl",
   "lang": "he",
-  "background_color": "#F8F4ED",
-  "theme_color": "#F8F4ED",
+  "background_color": "#17141F",
+  "theme_color": "#17141F",
   "icons": [
     { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
     { "src": "icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }

@@ -1,5 +1,5 @@
 /* מסלול · service worker: cache-first shell so the app works offline after first visit */
-const CACHE = 'maslul-v2';
+const CACHE = 'maslul-v3';
 const SHELL = [
   './', 'index.html', 'css/style.css',
   'js/content.js', 'js/engine.js', 'js/app.js',
@@ -7,7 +7,7 @@ const SHELL = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {
