@@ -402,6 +402,7 @@ button:active { transform: scale(.975); }
   position: fixed; inset: 0; z-index: 50; display: grid; place-items: center;
   background: rgba(13,11,18,.75); backdrop-filter: blur(4px); padding: 24px;
 }
+.disc-overlay[hidden] { display: none; }
 .disc-overlay .disc-card { margin: 0; }
 
 @media (max-width: 480px) {
