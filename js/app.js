@@ -97,6 +97,26 @@ function renderHome() {
     </button>`;
   }).join('');
 
+  const j = state.journey;
+  const station = Engine.stationOf(j.steps);
+  const region = Engine.regionOf(station + 1);
+  const toNext = Engine.stepsToNextStation();
+  const journeyDone = station >= Engine.totalStations();
+  const journeyCard = `
+    <button class="journey-card" id="journeyCard" style="--jc:${region.color}">
+      <div class="j-path-icon">
+        <svg viewBox="0 0 32 24"><path d="M1 22 L11 4 L17 15 L21 8 L30 22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="11" cy="4" r="2.2" fill="currentColor"/></svg>
+      </div>
+      <div class="j-info">
+        <div class="j-kicker">המסע שלך · ${esc(region.name)}</div>
+        <div class="j-line">${journeyDone
+          ? 'השלמת את כל המסע — כל 36 התגליות ביומן!'
+          : `עוד <b>${toNext}</b> ${toNext === 1 ? 'תשובה נכונה' : 'תשובות נכונות'} לתחנה הבאה — מה מסתתר שם?`}</div>
+        <div class="j-meta">${j.found.length} תגליות · תחנה ${station} מתוך ${Engine.totalStations()}</div>
+      </div>
+      <div class="j-arrow">‹</div>
+    </button>`;
+
   const namePrompt = state.name ? '' : `
     <div class="field" style="margin-top:18px; max-width:340px">
       <label for="nameInput">איך קוראים לך? (פעם אחת בלבד)</label>
@@ -108,14 +128,16 @@ function renderHome() {
       <div class="home-hero">
         <div class="home-date">${dateStr}</div>
         <h1 class="home-greet">${greet}</h1>
-        <div class="home-sub">במה מתאמנים היום?</div>
+        <div class="home-sub">לאן ממשיכים במסע היום?</div>
         ${namePrompt}
       </div>
+      ${journeyCard}
       <div class="module-list">${cards}</div>
     </div>`);
 
   screenEl.querySelectorAll('.module-card').forEach(b =>
     b.addEventListener('click', () => renderModule(b.dataset.mod)));
+  document.getElementById('journeyCard').addEventListener('click', renderMap);
 
   const ni = document.getElementById('nameInput');
   if (ni) ni.addEventListener('change', () => {
@@ -158,16 +180,18 @@ let S = null;
 function startSession(mod) {
   S = {
     mod, qs: Engine.buildSession(mod), i: 0,
-    good: 0, total: 0, t0: Date.now()
+    good: 0, total: 0, stepsEarned: 0, t0: Date.now()
   };
   nextQuestion();
 }
 
 function sessionTopHtml() {
   const def = MODULES[S.mod];
+  const steps = S.stepsEarned > 0 ? `<div class="steps-chip" title="צעדים שצברת למסע">🥾 ${S.stepsEarned}+</div>` : '';
   return `
   <div class="session-top" style="--mc:${def.color}">
     <button class="quit-btn" id="quitBtn" aria-label="יציאה">×</button>
+    ${steps}
     <div class="bar"><i style="width:${(S.i / S.qs.length) * 100}%"></i></div>
     <div class="count">${S.i + 1} / ${S.qs.length}</div>
   </div>`;
@@ -281,7 +305,7 @@ function renderQuestion(q) {
   function note(cls, txt) { const n = document.getElementById('fbNote'); n.className = 'feedback-note ' + cls; n.textContent = txt; }
   function finishQ(q, correct, msg) {
     S.total++;
-    if (correct) { S.good++; Audio2.tone('good'); }
+    if (correct) { S.good++; S.stepsEarned += (q.weight || 1); Audio2.tone('good'); }
     Engine.recordAnswer(S.mod, q, correct);
     note(correct ? 'good' : 'fix', msg);
     setTimeout(() => { S.i++; nextQuestion(); }, correct ? 950 : 1900);
@@ -369,7 +393,7 @@ function renderPassage(q) {
         if (btn.dataset.v === p.q.correct) {
           btn.classList.add('correct');
           document.querySelectorAll('.opt').forEach(b => b.disabled = true);
-          S.total++; S.good++;
+          S.total++; S.good++; S.stepsEarned += (q.weight || 1);
           Audio2.tone('good');
           Engine.recordAnswer(S.mod, q, true);
           setTimeout(() => { S.i++; nextQuestion(); }, 1000);
@@ -395,34 +419,151 @@ function renderPassage(q) {
 
 /* ─── summary ─── */
 function renderSummary() {
+  const unlocked = Engine.addSteps(S.stepsEarned);
   const leveledUp = Engine.finishSession(S.mod);
   const def = MODULES[S.mod];
   const m = state.mod[S.mod];
   const acc = S.total ? Math.round((S.good / S.total) * 100) : 0;
-  const mins = Math.max(1, Math.round((Date.now() - S.t0) / 60000));
   const streak = Engine.streakAlive();
+  const toNext = Engine.stepsToNextStation();
 
-  Audio2.tone(leveledUp ? 'levelup' : 'done');
+  Audio2.tone(unlocked.length ? 'levelup' : leveledUp ? 'levelup' : 'done');
+
+  const discHtml = unlocked.map(u => `
+    <div class="disc-card">
+      <div class="disc-kicker">תגלית חדשה ביומן המסע</div>
+      <div class="disc-emoji">${u.d.emoji}</div>
+      <div class="disc-name">${esc(u.d.name)}</div>
+      <div class="disc-fact">${esc(u.d.fact)}</div>
+      <button class="listen-btn disc-listen" data-fact="${esc(u.d.fact)}" style="--mc:var(--gold); align-self:center; margin:14px 0 0">${SPEAKER_SVG}<span>הקראה</span></button>
+    </div>`).join('');
 
   setScreen(`
     <div class="summary-wrap" style="--mc:${def.color}">
-      <div class="summary-kicker">האימון הושלם</div>
+      <div class="summary-kicker">${unlocked.length ? 'הגעת לתחנה חדשה' : 'המקטע הושלם'}</div>
       <div class="gold-line"></div>
       <h2 class="summary-title">${def.title} · רמה ${m.lvl}</h2>
       ${leveledUp ? `<div><span class="levelup-note">עלית לרמה ${m.lvl} — ${esc(Engine.levelName(S.mod, m.lvl))}</span></div>` : ''}
+      ${discHtml}
       <div class="summary-stats">
+        <div class="stat-box"><div class="v">+${S.stepsEarned}</div><div class="k">צעדים במסע</div></div>
         <div class="stat-box"><div class="v">${S.good}/${S.total}</div><div class="k">תשובות נכונות</div></div>
-        <div class="stat-box"><div class="v">${acc}%</div><div class="k">דיוק</div></div>
         ${streak ? `<div class="stat-box"><div class="v">${streak}</div><div class="k">ימים ברצף</div></div>` : ''}
       </div>
+      ${!unlocked.length && toNext ? `<div class="j-tease">עוד ${toNext} תשובות נכונות לתחנה הבאה במסע</div>` : ''}
       <div class="btn-row" style="justify-content:center">
-        <button class="btn-primary" id="againBtn">אימון נוסף</button>
+        <button class="btn-primary" id="mapBtn">אל המפה</button>
+        <button class="btn-ghost" id="againBtn">ממשיכים במסע</button>
         <button class="btn-ghost" id="homeBtn">מסך הבית</button>
       </div>
     </div>`);
   document.getElementById('againBtn').addEventListener('click', () => startSession(S.mod));
   document.getElementById('homeBtn').addEventListener('click', renderHome);
+  document.getElementById('mapBtn').addEventListener('click', renderMap);
+  screenEl.querySelectorAll('.disc-listen').forEach(b =>
+    b.addEventListener('click', () => Audio2.say(b.dataset.fact, 'he', b)));
   updateTopbar();
+}
+
+/* ─── the map ─── */
+function renderMap() {
+  const j = state.journey;
+  const N = Engine.totalStations();
+  const cur = Engine.stationOf(j.steps);
+  const W = 360, SP = 34, PAD = 60;
+  const H = PAD * 2 + N * SP;
+  const pt = i => ({ x: 180 + 128 * Math.sin(i * 0.55), y: H - PAD - i * SP });
+
+  /* smooth path through all nodes */
+  let d = '';
+  for (let i = 0; i <= N; i++) {
+    const p = pt(i);
+    if (i === 0) d = `M ${p.x.toFixed(1)} ${p.y.toFixed(1)}`;
+    else {
+      const prev = pt(i - 1);
+      d += ` C ${prev.x.toFixed(1)} ${(prev.y - SP * .55).toFixed(1)}, ${p.x.toFixed(1)} ${(p.y + SP * .55).toFixed(1)}, ${p.x.toFixed(1)} ${p.y.toFixed(1)}`;
+    }
+  }
+
+  /* region bands */
+  const per = N / WORLD_REGIONS.length;
+  const bands = WORLD_REGIONS.map((r, ri) => {
+    const yTop = pt(Math.min((ri + 1) * per + .5, N)).y - SP / 2;
+    const yBot = pt(ri * per + .5).y + SP / 2;
+    return `<rect x="0" y="${yTop.toFixed(1)}" width="${W}" height="${(yBot - yTop).toFixed(1)}" fill="${r.color}" opacity="0.05"/>
+      <text x="14" y="${(yTop + 26).toFixed(1)}" fill="${r.color}" opacity=".75" font-size="13" font-weight="700">${r.name}</text>`;
+  }).join('');
+
+  const nodes = [];
+  for (let i = 0; i <= N; i++) {
+    const p = pt(i);
+    if (i === 0) {
+      nodes.push(`<circle cx="${p.x}" cy="${p.y}" r="7" fill="var(--gold)"/><text x="${p.x + 14}" y="${p.y + 4}" fill="var(--cream-soft)" font-size="12">נקודת ההתחלה</text>`);
+      continue;
+    }
+    const reached = i <= cur;
+    const disc = DISCOVERIES[i - 1];
+    const col = Engine.regionOf(i).color;
+    if (reached) {
+      nodes.push(`<g class="st-found" data-st="${i}" style="cursor:pointer">
+        <circle cx="${p.x}" cy="${p.y}" r="15" fill="${col}" opacity=".16"/>
+        <circle cx="${p.x}" cy="${p.y}" r="12.5" fill="#272134" stroke="${col}" stroke-width="1.6"/>
+        <text x="${p.x}" y="${p.y + 5}" text-anchor="middle" font-size="14">${disc.emoji}</text>
+      </g>`);
+    } else {
+      nodes.push(`<circle cx="${p.x}" cy="${p.y}" r="5.5" fill="none" stroke="rgba(244,238,225,.28)" stroke-width="1.6" ${i === cur + 1 ? `stroke-dasharray="2 3"` : ''}/>`);
+      if (i === cur + 1) nodes.push(`<text x="${p.x}" y="${p.y - 14}" text-anchor="middle" fill="var(--cream-faint)" font-size="11">?</text>`);
+    }
+  }
+  /* the traveler dot sits at the last reached node */
+  const cp = pt(cur);
+  const traveler = `
+    <circle cx="${cp.x}" cy="${cp.y}" r="20" fill="none" stroke="var(--gold)" stroke-width="1.4" opacity=".55">
+      <animate attributeName="r" values="17;23;17" dur="2.4s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values=".55;.15;.55" dur="2.4s" repeatCount="indefinite"/>
+    </circle>`;
+
+  setScreen(`
+    <div class="map-head">
+      <div>
+        <div class="li-kicker" style="--mc:var(--gold)">מפת המסע</div>
+        <h2 class="map-title">${esc(Engine.regionOf(Math.max(cur, 1)).name)}</h2>
+        <div class="map-sub">${j.found.length} תגליות מתוך ${N} · כל תשובה נכונה = צעד קדימה</div>
+      </div>
+      <button class="btn-ghost" id="mapBack">חזרה</button>
+    </div>
+    <div class="map-wrap" id="mapWrap">
+      <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">
+        ${bands}
+        <path d="${d}" fill="none" stroke="rgba(244,238,225,.16)" stroke-width="3" stroke-linecap="round" stroke-dasharray="1 9"/>
+        ${nodes.join('')}
+        ${traveler}
+      </svg>
+    </div>
+    <div class="disc-overlay" id="discOverlay" hidden>
+      <div class="disc-card" id="discOverlayCard"></div>
+    </div>`);
+
+  document.getElementById('mapBack').addEventListener('click', renderHome);
+  const wrap = document.getElementById('mapWrap');
+  /* scroll so the traveler is visible */
+  requestAnimationFrame(() => {
+    const frac = cp.y / H;
+    wrap.scrollTop = frac * wrap.scrollHeight - wrap.clientHeight * 0.55;
+  });
+  const overlay = document.getElementById('discOverlay');
+  screenEl.querySelectorAll('.st-found').forEach(g => g.addEventListener('click', () => {
+    const dsc = DISCOVERIES[+g.dataset.st - 1];
+    document.getElementById('discOverlayCard').innerHTML = `
+      <div class="disc-kicker">מתוך יומן המסע</div>
+      <div class="disc-emoji">${dsc.emoji}</div>
+      <div class="disc-name">${esc(dsc.name)}</div>
+      <div class="disc-fact">${esc(dsc.fact)}</div>
+      <button class="listen-btn" id="discSay" style="--mc:var(--gold); align-self:center; margin:14px 0 0">${SPEAKER_SVG}<span>הקראה</span></button>`;
+    overlay.hidden = false;
+    document.getElementById('discSay').addEventListener('click', e => Audio2.say(dsc.fact, 'he', e.currentTarget));
+  }));
+  overlay.addEventListener('click', e => { if (e.target === overlay) { overlay.hidden = true; speechSynthesis.cancel(); } });
 }
 
 /* ─── settings ─── */

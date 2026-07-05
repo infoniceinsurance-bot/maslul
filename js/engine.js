@@ -20,7 +20,40 @@ const Engine = {
         review: { math: [], hebrew: [], english: [] }
       };
     }
+    /* migration: journey added in v2 of the app */
+    if (!this.state.journey) this.state.journey = { steps: 0, found: [] };
     return this.state;
+  },
+
+  /* ─── the journey ───
+     station i (1..N) is reached at steps >= i * STEPS_PER_STATION.
+     Returns the discoveries that were just unlocked. */
+  totalStations() { return DISCOVERIES.length; },
+
+  stationOf(steps) { return Math.min(Math.floor(steps / STEPS_PER_STATION), this.totalStations()); },
+
+  regionOf(station) {
+    const per = this.totalStations() / WORLD_REGIONS.length;
+    return WORLD_REGIONS[Math.min(Math.floor(Math.max(station - 1, 0) / per), WORLD_REGIONS.length - 1)];
+  },
+
+  addSteps(n) {
+    const j = this.state.journey;
+    const before = this.stationOf(j.steps);
+    j.steps += n;
+    const after = this.stationOf(j.steps);
+    const unlocked = [];
+    for (let s = before + 1; s <= after; s++) {
+      if (!j.found.includes(s)) { j.found.push(s); unlocked.push({ station: s, d: DISCOVERIES[s - 1] }); }
+    }
+    return unlocked;
+  },
+
+  stepsToNextStation() {
+    const j = this.state.journey;
+    const cur = this.stationOf(j.steps);
+    if (cur >= this.totalStations()) return 0;
+    return (cur + 1) * STEPS_PER_STATION - j.steps;
   },
 
   save() { localStorage.setItem(STORE_KEY, JSON.stringify(this.state)); },

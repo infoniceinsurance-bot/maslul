@@ -1,5 +1,5 @@
 /* מסלול · service worker: cache-first shell so the app works offline after first visit */
-const CACHE = 'maslul-v3';
+const CACHE = 'maslul-v4';
 const SHELL = [
   './', 'index.html', 'css/style.css',
   'js/content.js', 'js/engine.js', 'js/app.js',
