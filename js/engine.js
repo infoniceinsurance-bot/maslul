@@ -69,7 +69,7 @@ const Engine = {
       const passage = this.makeQuestion(mod, m.lvl, null, 'main');
       passage.weight = 3;
       while (qs.length < 6) {
-        const backLvl = rnd(Math.max(1, m.lvl - 4), 6);
+        const backLvl = rnd(Math.min(6, Math.max(1, m.lvl - 4)), 6);
         qs.push(this.makeQuestion(mod, backLvl, null, 'easy'));
       }
       qs.splice(Math.min(2, qs.length), 0, passage);
