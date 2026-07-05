@@ -20,8 +20,10 @@ const Engine = {
         review: { math: [], hebrew: [], english: [] }
       };
     }
-    /* migration: journey added in v2 of the app */
+    /* migration: journey added in v2 of the app, gates in v3 */
     if (!this.state.journey) this.state.journey = { steps: 0, found: [] };
+    if (!this.state.journey.gates) this.state.journey.gates = [false, false, false, false];
+    if (this.state.journey.introSeen === undefined) this.state.journey.introSeen = false;
     return this.state;
   },
 
@@ -37,16 +39,55 @@ const Engine = {
     return WORLD_REGIONS[Math.min(Math.floor(Math.max(station - 1, 0) / per), WORLD_REGIONS.length - 1)];
   },
 
+  /* steps are capped at the first locked gate — the guard blocks the way */
+  stepsCap() {
+    const j = this.state.journey;
+    const perRegion = this.totalStations() / WORLD_REGIONS.length; /* 9 */
+    for (let g = 0; g < WORLD_REGIONS.length; g++) {
+      if (!j.gates[g]) return (g + 1) * perRegion * STEPS_PER_STATION;
+    }
+    return this.totalStations() * STEPS_PER_STATION;
+  },
+
   addSteps(n) {
     const j = this.state.journey;
     const before = this.stationOf(j.steps);
-    j.steps += n;
+    j.steps = Math.min(j.steps + n, this.stepsCap());
     const after = this.stationOf(j.steps);
     const unlocked = [];
     for (let s = before + 1; s <= after; s++) {
       if (!j.found.includes(s)) { j.found.push(s); unlocked.push({ station: s, d: DISCOVERIES[s - 1] }); }
     }
     return unlocked;
+  },
+
+  /* index of the gate the traveler is standing at (steps == cap), or -1 */
+  currentGate() {
+    const j = this.state.journey;
+    if (j.steps < this.stepsCap()) return -1;
+    const perRegion = this.totalStations() / WORLD_REGIONS.length;
+    for (let g = 0; g < WORLD_REGIONS.length; g++) {
+      if (!j.gates[g] && j.steps >= (g + 1) * perRegion * STEPS_PER_STATION) return g;
+    }
+    return -1;
+  },
+
+  passGate(g) { this.state.journey.gates[g] = true; this.save(); },
+
+  journeyComplete() { return this.state.journey.gates.every(Boolean); },
+
+  /* gate challenge: 6 mixed questions from all subjects at current levels */
+  buildGateSession() {
+    const mods = ['math', 'hebrew', 'english'];
+    const qs = [];
+    for (let i = 0; i < 6; i++) {
+      const mod = mods[i % 3];
+      let lvl = this.state.mod[mod].lvl;
+      /* לא שולפים קטע קריאה למשימת שער — רק שאלות קצרות */
+      if (mod === 'hebrew' && HE_LEVELS[Math.min(lvl, HE_LEVELS.length) - 1].type === 'passage') lvl = 6;
+      qs.push(this.makeQuestion(mod, lvl, null, 'main'));
+    }
+    return shuffle(qs);
   },
 
   stepsToNextStation() {
@@ -241,7 +282,7 @@ const Engine = {
     return {
       module: 'hebrew', type: 'choice', optClass: 'hebrew-word',
       prompt: null, sub: 'הקשיבי ובחרי את מה ששמעת',
-      listen: { text: item.say, lang: 'he' }, autoListen: true,
+      listen: { text: item.say, lang: 'he', repeat: def.type !== 'sentence' }, autoListen: true,
       answer: item.show, options: shuffle([item.show, ...foils]), seed: s,
       singleCol: def.type === 'sentence'
     };
@@ -261,7 +302,7 @@ const Engine = {
         return {
           module: 'english', type: 'choice', optClass: 'en-glyph', letterGrid: true,
           prompt: null, sub: 'הקשיבי ולחצי על האות ששמעת',
-          listen: { text: target, lang: 'en' }, autoListen: true,
+          listen: { text: target, lang: 'en', repeat: true }, autoListen: true,
           answer: target, options: shuffle([target, ...foils]), seed: s
         };
       }
@@ -285,7 +326,7 @@ const Engine = {
       return {
         module: 'english', type: 'choice', optClass: 'en-glyph', letterGrid: true,
         prompt: null, sub: 'באיזו אות מתחילה המילה ששמעת?',
-        listen: { text: item.w, lang: 'en' }, autoListen: true,
+        listen: { text: item.w, lang: 'en', repeat: true }, autoListen: true,
         answer: first, options: shuffle([first, ...foils]), seed: s
       };
     }
@@ -294,7 +335,7 @@ const Engine = {
       return {
         module: 'english', type: 'choice', optClass: 'en-glyph',
         prompt: null, sub: 'הקשיבי ובחרי את המילה ששמעת',
-        listen: { text: item.w, lang: 'en' }, autoListen: true,
+        listen: { text: item.w, lang: 'en', repeat: true }, autoListen: true,
         answer: item.w, options: shuffle([item.w, ...foils]), seed: s
       };
     }
@@ -304,7 +345,7 @@ const Engine = {
       module: 'english', type: 'choice', optClass: 'hebrew-word',
       prompt: item.w, promptClass: 'en',
       sub: 'מה פירוש המילה?',
-      listen: { text: item.w, lang: 'en' }, autoListen: true,
+      listen: { text: item.w, lang: 'en', repeat: true }, autoListen: true,
       answer: item.he, options: shuffle([item.he, ...foils]), seed: s
     };
   }

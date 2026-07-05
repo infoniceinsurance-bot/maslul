@@ -20,17 +20,34 @@ const Audio2 = {
     }
     return null;
   },
-  say(text, lang, btn) {
-    if (!('speechSynthesis' in window)) return;
-    speechSynthesis.cancel();
+  _mk(text, lang, rate) {
     const u = new SpeechSynthesisUtterance(text);
     u.lang = lang === 'he' ? 'he-IL' : 'en-US';
     const v = this.pickVoice(lang);
     if (v) u.voice = v;
-    u.rate = lang === 'he' ? 0.88 : 0.82;
-    if (btn) {
-      btn.classList.add('playing');
-      u.onend = u.onerror = () => btn.classList.remove('playing');
+    u.rate = rate;
+    return u;
+  },
+  /* repeat=true: single words/letters are read twice — normal-slow, pause, then very slow */
+  say(text, lang, btn, repeat) {
+    if (!('speechSynthesis' in window)) return;
+    speechSynthesis.cancel();
+    clearTimeout(this._repTimer);
+    const baseRate = lang === 'he' ? (repeat ? 0.72 : 0.8) : (repeat ? 0.65 : 0.75);
+    const u = this._mk(text, lang, baseRate);
+    const done = () => { if (btn) btn.classList.remove('playing'); };
+    if (btn) btn.classList.add('playing');
+    if (repeat) {
+      u.onend = () => {
+        this._repTimer = setTimeout(() => {
+          const u2 = this._mk(text, lang, Math.max(baseRate - 0.12, 0.5));
+          u2.onend = u2.onerror = done;
+          speechSynthesis.speak(u2);
+        }, 650);
+      };
+      u.onerror = done;
+    } else {
+      u.onend = u.onerror = done;
     }
     speechSynthesis.speak(u);
   },
@@ -107,18 +124,21 @@ function renderHome() {
   const station = Engine.stationOf(j.steps);
   const region = Engine.regionOf(station + 1);
   const toNext = Engine.stepsToNextStation();
-  const journeyDone = station >= Engine.totalStations();
+  const gate = Engine.currentGate();
+  const journeyDone = Engine.journeyComplete();
+  let jLine;
+  if (journeyDone) jLine = 'הנסיכה נוגה חופשייה — השלמת את המשימה! אפשר להמשיך להתאמן ולאסוף את כל התגליות.';
+  else if (gate >= 0) jLine = `${STORY.gates[gate].guard} חוסמת את הדרך — <b>משימת ${STORY.gates[gate].name}</b> ממתינה לך!`;
+  else jLine = `עוד <b>${toNext}</b> ${toNext === 1 ? 'תשובה נכונה' : 'תשובות נכונות'} לתחנה הבאה — מה מסתתר שם?`;
   const journeyCard = `
-    <button class="journey-card" id="journeyCard" style="--jc:${region.color}">
-      <div class="j-path-icon">
-        <svg viewBox="0 0 32 24"><path d="M1 22 L11 4 L17 15 L21 8 L30 22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="11" cy="4" r="2.2" fill="currentColor"/></svg>
+    <button class="journey-card ${gate >= 0 ? 'gate-waiting' : ''}" id="journeyCard" style="--jc:${region.color}">
+      <div class="j-path-icon">${gate >= 0 ? `<div class="j-gate-emoji">${STORY.gates[gate].emoji}</div>` :
+        `<svg viewBox="0 0 32 24"><path d="M1 22 L11 4 L17 15 L21 8 L30 22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="11" cy="4" r="2.2" fill="currentColor"/></svg>`}
       </div>
       <div class="j-info">
-        <div class="j-kicker">המסע שלך · ${esc(region.name)}</div>
-        <div class="j-line">${journeyDone
-          ? 'השלמת את כל המסע — כל 36 התגליות ביומן!'
-          : `עוד <b>${toNext}</b> ${toNext === 1 ? 'תשובה נכונה' : 'תשובות נכונות'} לתחנה הבאה — מה מסתתר שם?`}</div>
-        <div class="j-meta">${j.found.length} תגליות · תחנה ${station} מתוך ${Engine.totalStations()}</div>
+        <div class="j-kicker">המשימה: להציל את הנסיכה נוגה · ${esc(region.name)}</div>
+        <div class="j-line">${jLine}</div>
+        <div class="j-meta">${j.found.length} תגליות · ${j.gates.filter(Boolean).length}/4 שערים נפתחו</div>
       </div>
       <div class="j-arrow">‹</div>
     </button>`;
@@ -143,7 +163,14 @@ function renderHome() {
 
   screenEl.querySelectorAll('.module-card').forEach(b =>
     b.addEventListener('click', () => nav(() => renderModule(b.dataset.mod))));
-  document.getElementById('journeyCard').addEventListener('click', () => nav(renderMap));
+  document.getElementById('journeyCard').addEventListener('click', () => {
+    if (!state.journey.introSeen) {
+      state.journey.introSeen = true; Engine.save();
+      nav(() => renderStory(STORY.intro, 'יוצאים לדרך', renderMap));
+    } else if (Engine.currentGate() >= 0) {
+      nav(renderGateIntro);
+    } else nav(renderMap);
+  });
 
   const ni = document.getElementById('nameInput');
   if (ni) ni.addEventListener('change', () => {
@@ -159,14 +186,14 @@ function renderModule(mod) {
   const items = def.levels.map((lv, i) => {
     const n = i + 1;
     const cls = n < m.lvl ? 'done' : n === m.lvl ? 'now' : '';
-    return `<div class="lp-item ${cls}"><span class="dot"></span><span>רמה ${n} · ${esc(lv.name)}</span></div>`;
+    return `<div class="lp-item ${cls}" data-lvl="${n}" role="button"><span class="dot"></span><span>רמה ${n} · ${esc(lv.name)}</span></div>`;
   }).join('');
 
   setScreen(`
     <div class="level-intro" style="--mc:${def.color}">
       <div class="li-kicker">${def.title}</div>
       <h2 class="li-title">רמה ${m.lvl} · ${esc(Engine.levelName(mod, m.lvl))}</h2>
-      <div class="li-sub">אימון קצר של 10 שאלות. עובדים בקצב שלך.</div>
+      <div class="li-sub">אימון קצר של 10 שאלות. קל מדי או קשה מדי? אפשר ללחוץ על כל רמה כדי לעבור אליה.</div>
       <div class="level-path" id="lvlPath">${items}</div>
       <div class="btn-row">
         <button class="btn-primary" id="startBtn">מתחילים</button>
@@ -178,6 +205,12 @@ function renderModule(mod) {
   if (now) now.scrollIntoView({ block: 'center' });
   document.getElementById('startBtn').addEventListener('click', () => startSession(mod));
   document.getElementById('backBtn').addEventListener('click', renderHome);
+  screenEl.querySelectorAll('.lp-item').forEach(el => el.addEventListener('click', () => {
+    const n = +el.dataset.lvl;
+    if (n === m.lvl) return;
+    m.lvl = n; m.prog = 0; Engine.save();
+    renderModule(mod);
+  }));
 }
 
 /* ─── session ─── */
@@ -204,8 +237,9 @@ function sessionTopHtml() {
 }
 
 function nextQuestion() {
-  if (S.i >= S.qs.length) return renderSummary();
+  if (S.i >= S.qs.length) return S.gate != null ? renderGateResult() : renderSummary();
   const q = S.qs[S.i];
+  if (S.gate != null) S.mod = q.module; /* משימת שער מערבבת מקצועות — הצבע והרישום לפי השאלה */
   if (q.type === 'passage') renderPassage(q);
   else renderQuestion(q);
 }
@@ -247,7 +281,7 @@ function renderQuestion(q) {
 
   const listenBtn = document.getElementById('listenBtn');
   if (listenBtn) {
-    const play = () => Audio2.say(q.listen.text, q.listen.lang, listenBtn);
+    const play = () => Audio2.say(q.listen.text, q.listen.lang, listenBtn, q.listen.repeat);
     listenBtn.addEventListener('click', play);
     if (q.autoListen) setTimeout(play, 450);
   }
@@ -432,6 +466,7 @@ function renderSummary() {
   const acc = S.total ? Math.round((S.good / S.total) * 100) : 0;
   const streak = Engine.streakAlive();
   const toNext = Engine.stepsToNextStation();
+  const gateNow = Engine.currentGate();
 
   Audio2.tone(unlocked.length ? 'levelup' : leveledUp ? 'levelup' : 'done');
 
@@ -456,9 +491,11 @@ function renderSummary() {
         <div class="stat-box"><div class="v">${S.good}/${S.total}</div><div class="k">תשובות נכונות</div></div>
         ${streak ? `<div class="stat-box"><div class="v">${streak}</div><div class="k">ימים ברצף</div></div>` : ''}
       </div>
-      ${!unlocked.length && toNext ? `<div class="j-tease">עוד ${toNext} תשובות נכונות לתחנה הבאה במסע</div>` : ''}
+      ${gateNow >= 0 ? `<div class="j-tease" style="color:var(--gold);font-weight:700">${STORY.gates[gateNow].emoji} הגעת אל ${esc(STORY.gates[gateNow].name)} — ${esc(STORY.gates[gateNow].guard)} מחכה לך</div>` :
+        !unlocked.length && toNext ? `<div class="j-tease">עוד ${toNext} תשובות נכונות לתחנה הבאה במסע</div>` : ''}
       <div class="btn-row" style="justify-content:center">
-        <button class="btn-primary" id="mapBtn">אל המפה</button>
+        ${gateNow >= 0 ? `<button class="btn-primary" id="gateBtn" style="--mc:var(--gold)">אל משימת השער</button>` : ''}
+        <button class="${gateNow >= 0 ? 'btn-ghost' : 'btn-primary'}" id="mapBtn">אל המפה</button>
         <button class="btn-ghost" id="againBtn">ממשיכים במסע</button>
         <button class="btn-ghost" id="homeBtn">מסך הבית</button>
       </div>
@@ -466,8 +503,79 @@ function renderSummary() {
   document.getElementById('againBtn').addEventListener('click', () => startSession(S.mod));
   document.getElementById('homeBtn').addEventListener('click', renderHome);
   document.getElementById('mapBtn').addEventListener('click', renderMap);
+  const gb = document.getElementById('gateBtn');
+  if (gb) gb.addEventListener('click', renderGateIntro);
   screenEl.querySelectorAll('.disc-listen').forEach(b =>
     b.addEventListener('click', () => Audio2.say(b.dataset.fact, 'he', b)));
+  updateTopbar();
+}
+
+/* ─── story screens & gate missions ─── */
+function renderStory(part, btnLabel, next) {
+  setScreen(`
+    <div class="summary-wrap">
+      <div class="story-card">
+        <div class="disc-kicker">${part.guard ? esc(part.guard) : 'הסיפור'}</div>
+        <div class="disc-emoji">${part.emoji}</div>
+        <div class="disc-name">${esc(part.title || part.name)}</div>
+        <div class="disc-fact story-text">${esc(part.text || part.intro || part.win)}</div>
+        <button class="listen-btn" id="storySay" style="--mc:var(--gold); align-self:center; margin:16px 0 0">${SPEAKER_SVG}<span>הקראה</span></button>
+      </div>
+      <div class="btn-row" style="justify-content:center">
+        <button class="btn-primary" id="storyNext" style="--mc:var(--gold)">${esc(btnLabel)}</button>
+      </div>
+    </div>`);
+  const txt = part.text || part.intro || part.win;
+  document.getElementById('storySay').addEventListener('click', e => Audio2.say(txt, 'he', e.currentTarget));
+  document.getElementById('storyNext').addEventListener('click', next);
+}
+
+function renderGateIntro() {
+  const g = Engine.currentGate();
+  if (g < 0) return renderMap();
+  const gate = STORY.gates[g];
+  renderStory({ emoji: gate.emoji, name: gate.name, guard: gate.guard, intro: gate.intro },
+    'מתחילים את משימת השער', () => startGateSession(g));
+}
+
+function startGateSession(g) {
+  S = {
+    mod: 'math', gate: g, need: 5,
+    qs: Engine.buildGateSession(), i: 0,
+    good: 0, total: 0, stepsEarned: 0, t0: Date.now()
+  };
+  nextQuestion();
+}
+
+function renderGateResult() {
+  const g = S.gate;
+  const gate = STORY.gates[g];
+  const won = S.good >= S.need;
+  if (won) {
+    Engine.passGate(g);
+    Audio2.tone('levelup');
+    const isFinale = g === STORY.gates.length - 1;
+    renderStory({ emoji: gate.emoji, name: 'השער נפתח!', guard: gate.guard, win: gate.win },
+      isFinale ? 'אל הנסיכה' : 'ממשיכים במסע',
+      isFinale ? () => renderStory(STORY.finale, 'אל המפה', renderMap) : renderMap);
+  } else {
+    Audio2.tone('bad');
+    setScreen(`
+      <div class="summary-wrap">
+        <div class="story-card">
+          <div class="disc-kicker">${esc(gate.guard)}</div>
+          <div class="disc-emoji">${gate.emoji}</div>
+          <div class="disc-name">השער עדיין נעול</div>
+          <div class="disc-fact story-text">"ענית נכון על ${S.good} מתוך ${S.total}. כמעט! חזרי להתאמן קצת — השער יחכה לך כאן."</div>
+        </div>
+        <div class="btn-row" style="justify-content:center">
+          <button class="btn-primary" id="gateRetry" style="--mc:var(--gold)">מנסים שוב</button>
+          <button class="btn-ghost" id="gateHome">להתאמן קודם</button>
+        </div>
+      </div>`);
+    document.getElementById('gateRetry').addEventListener('click', () => startGateSession(g));
+    document.getElementById('gateHome').addEventListener('click', renderHome);
+  }
   updateTopbar();
 }
 
@@ -521,6 +629,23 @@ function renderMap() {
       if (i === cur + 1) nodes.push(`<text x="${p.x}" y="${p.y - 14}" text-anchor="middle" fill="var(--cream-faint)" font-size="11">?</text>`);
     }
   }
+  /* gate markers sit between regions */
+  const perR = N / WORLD_REGIONS.length;
+  const pendingGate = Engine.currentGate();
+  for (let g = 0; g < WORLD_REGIONS.length; g++) {
+    const b = (g + 1) * perR; /* boundary station */
+    const p1 = pt(b), p2 = g === WORLD_REGIONS.length - 1 ? { x: p1.x, y: p1.y - SP } : pt(b + 1);
+    const gx = (p1.x + p2.x) / 2, gy = (p1.y + p2.y) / 2;
+    const passed = j.gates[g];
+    const pending = g === pendingGate;
+    nodes.push(`<g ${pending ? 'class="gate-node" data-gate="1" style="cursor:pointer"' : ''}>
+      <circle cx="${gx}" cy="${gy}" r="14" fill="${passed ? 'rgba(232,185,80,.12)' : '#1D1928'}"
+        stroke="${passed ? 'var(--gold)' : pending ? 'var(--gold)' : 'rgba(244,238,225,.2)'}" stroke-width="${pending ? 2 : 1.4}" ${pending ? '' : passed ? '' : 'stroke-dasharray="3 3"'}/>
+      <text x="${gx}" y="${gy + 5}" text-anchor="middle" font-size="13">${passed ? STORY.gates[g].emoji : '🔒'}</text>
+      ${pending ? `<circle cx="${gx}" cy="${gy}" r="21" fill="none" stroke="var(--gold)" stroke-width="1.2" opacity=".6"><animate attributeName="r" values="17;25;17" dur="2s" repeatCount="indefinite"/><animate attributeName="opacity" values=".6;.1;.6" dur="2s" repeatCount="indefinite"/></circle>` : ''}
+    </g>`);
+  }
+
   /* the traveler dot sits at the last reached node */
   const cp = pt(cur);
   const traveler = `
@@ -532,12 +657,14 @@ function renderMap() {
   setScreen(`
     <div class="map-head">
       <div>
-        <div class="li-kicker" style="--mc:var(--gold)">מפת המסע</div>
+        <div class="li-kicker" style="--mc:var(--gold)">המשימה: להציל את הנסיכה נוגה</div>
         <h2 class="map-title">${esc(Engine.regionOf(Math.max(cur, 1)).name)}</h2>
-        <div class="map-sub">${j.found.length} תגליות מתוך ${N} · כל תשובה נכונה = צעד קדימה</div>
+        <div class="map-sub">${j.found.length} תגליות · ${j.gates.filter(Boolean).length}/4 שערים · כל תשובה נכונה = צעד של אור</div>
       </div>
       <button class="btn-ghost" id="mapBack">חזרה</button>
     </div>
+    ${Engine.currentGate() >= 0 ? `<button class="btn-primary gate-cta" id="mapGateBtn" style="--mc:var(--gold)">${STORY.gates[Engine.currentGate()].emoji} אל משימת ${esc(STORY.gates[Engine.currentGate()].name)}</button>` : ''}
+    ${Engine.journeyComplete() ? `<div class="j-tease" style="color:var(--gold);font-weight:700;text-align:center;margin:0 0 10px">👑 הנסיכה נוגה חופשייה — המשימה הושלמה</div>` : ''}
     <div class="map-wrap" id="mapWrap">
       <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">
         ${bands}
@@ -551,6 +678,9 @@ function renderMap() {
     </div>`);
 
   document.getElementById('mapBack').addEventListener('click', renderHome);
+  const mgb = document.getElementById('mapGateBtn');
+  if (mgb) mgb.addEventListener('click', renderGateIntro);
+  screenEl.querySelectorAll('.gate-node').forEach(g => g.addEventListener('click', renderGateIntro));
   const wrap = document.getElementById('mapWrap');
   /* scroll so the traveler is visible */
   requestAnimationFrame(() => {
