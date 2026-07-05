@@ -59,9 +59,15 @@ Audio2.init();
 
 /* ─── shared ─── */
 function setScreen(html, cls = 'screen-enter') {
-  speechSynthesis && speechSynthesis.cancel();
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
   screenEl.innerHTML = html;
   screenEl.className = cls;
+}
+/* navigate forward: register a history entry so the browser back button
+   returns to the home screen instead of leaving the app */
+function nav(renderFn) {
+  try { history.pushState({ maslul: 1 }, ''); } catch (e) {}
+  renderFn();
 }
 function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'); }
 function updateTopbar() {
@@ -136,8 +142,8 @@ function renderHome() {
     </div>`);
 
   screenEl.querySelectorAll('.module-card').forEach(b =>
-    b.addEventListener('click', () => renderModule(b.dataset.mod)));
-  document.getElementById('journeyCard').addEventListener('click', renderMap);
+    b.addEventListener('click', () => nav(() => renderModule(b.dataset.mod))));
+  document.getElementById('journeyCard').addEventListener('click', () => nav(renderMap));
 
   const ni = document.getElementById('nameInput');
   if (ni) ni.addEventListener('change', () => {
@@ -563,7 +569,7 @@ function renderMap() {
     overlay.hidden = false;
     document.getElementById('discSay').addEventListener('click', e => Audio2.say(dsc.fact, 'he', e.currentTarget));
   }));
-  overlay.addEventListener('click', e => { if (e.target === overlay) { overlay.hidden = true; speechSynthesis.cancel(); } });
+  overlay.addEventListener('click', e => { if (e.target === overlay) { overlay.hidden = true; if (window.speechSynthesis) window.speechSynthesis.cancel(); } });
 }
 
 /* ─── settings ─── */
@@ -598,5 +604,7 @@ function renderSettings() {
 
 /* ─── boot ─── */
 document.getElementById('brandHome').addEventListener('click', renderHome);
-document.getElementById('settingsBtn').addEventListener('click', renderSettings);
+document.getElementById('settingsBtn').addEventListener('click', () => nav(renderSettings));
+try { history.replaceState({ maslul: 0 }, ''); } catch (e) {}
+window.addEventListener('popstate', () => { S = null; renderHome(); });
 renderHome();
